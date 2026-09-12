@@ -94,19 +94,20 @@ def evaluar_operacion_anterior(precio_actual):
     if os.path.exists(PENDIENTE_FILE):
         os.remove(PENDIENTE_FILE)
 
-def obtener_velas_binance():
-    """Consulta directa a la API pública de Binance Spot para evitar bloqueos geográficos de CCXT"""
-    url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=100"
+def obtener_velas_kraken():
+    """Consulta velas de 5m de BTC/USD en la API pública de Kraken (sin bloqueos de región en GitHub)"""
+    url = "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=5"
     try:
         response = requests.get(url, timeout=10)
         data = response.json()
-        if isinstance(data, list):
-            return data
+        if "result" in data and "XXBTZUSD" in data["result"]:
+            # Kraken devuelve una lista de listas: [time, open, high, low, close, vwap, volume, count]
+            return data["result"]["XXBTZUSD"]
         else:
-            print(f"Error en respuesta de Binance: {data}")
+            print(f"Error en respuesta de Kraken: {data}")
             return None
     except Exception as e:
-        print(f"Error conectando a la API de Binance: {e}")
+        print(f"Error conectando a la API de Kraken: {e}")
         return None
 
 def calcular_indicadores(df):
@@ -124,19 +125,14 @@ def main():
     if not verificar_filtro_tiempo():
         return
 
-    raw_data = obtener_velas_binance()
+    raw_data = obtener_velas_kraken()
     if not raw_data:
-        print("No se pudieron obtener datos de Binance.")
+        print("No se pudieron obtener datos de mercado.")
         return
 
-    # Convertir a DataFrame (la API devuelve [timestamp, open, high, low, close, volume, ...])
-    df = pd.DataFrame(raw_data, columns=[
-        'timestamp', 'open', 'high', 'low', 'close', 'volume', 
-        'close_time', 'quote_asset_volume', 'number_of_trades', 
-        'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-    ])
+    # Convertir a DataFrame asegurando las columnas clave
+    df = pd.DataFrame(raw_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'vwap', 'volume', 'count'])
     
-    # Convertir columnas de precios a float
     df['close'] = df['close'].astype(float)
     df['open'] = df['open'].astype(float)
     df['high'] = df['high'].astype(float)
@@ -165,12 +161,12 @@ def main():
         elif rsi > 65:
             senal = "PUT"
 
-    print(f"💡 Precio BTC: {precio_actual} | EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | RSI: {rsi:.2f}")
+    print(f"💡 Precio BTC (Kraken): {precio_actual} | EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | RSI: {rsi:.2f}")
 
     if senal:
         msg_senal = (
             f"🚨 *¡NUEVA SEÑAL BINARIAS (5m)*\n\n"
-            f"🪙 Par: `BTC/USDT`\n"
+            f"🪙 Par: `BTC/USD (Kraken)`\n"
             f"📈 Dirección: *{senal}*\n"
             f"💵 Precio sugerido: `{precio_actual}`\n"
             f"📊 RSI: `{rsi:.2f}` | EMA20: `{ema20:.2f}`"
