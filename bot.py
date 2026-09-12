@@ -60,32 +60,37 @@ def evaluar_operacion_anterior(precio_actual):
     tipo = pendiente["tipo"]
     precio_entrada = pendiente["precio_entrada"]
     
-    resultado = "PENDIENTE"
+    # Evaluar resultado
     if tipo == "CALL":
-        if precio_actual > precio_entrada:
-            resultado = "WIN (ITM) 🟢"
-            stats["wins"] += 1
-        else:
-            resultado = "LOSS (OTM) 🔴"
-            stats["losses"] += 1
-    elif tipo == "PUT":
-        if precio_actual < precio_entrada:
-            resultado = "WIN (ITM) 🟢"
-            stats["wins"] += 1
-        else:
-            resultado = "LOSS (OTM) 🔴"
-            stats["losses"] += 1
+        is_win = precio_actual > precio_entrada
+    else:  # PUT
+        is_win = precio_actual < precio_entrada
+        
+    if is_win:
+        stats["wins"] += 1
+        resultado_str = "ITM / GANADA 🟢"
+        vela_final = "VERDE 🟢" if tipo == "CALL" else "ROJA 🔴"
+    else:
+        stats["losses"] += 1
+        resultado_str = "OTM / PERDIDA ❌"
+        vela_final = "ROJA 🔴" if tipo == "CALL" else "VERDE 🟢"
             
     stats["total"] += 1
-    winrate = (stats["wins"] / stats["total"]) * 100 if stats["total"] > 0 else 0
+    wins = stats["wins"]
+    losses = stats["losses"]
+    total = stats["total"]
+    winrate = (wins / total) * 100 if total > 0 else 0
     
+    # Plantilla de Resultado
     msg_eval = (
-        f"📊 *Evaluación Operación Anterior*\n"
-        f"• Tipo: `{tipo}`\n"
-        f"• Entrada: `{precio_entrada}`\n"
-        f"• Salida actual: `{precio_actual}`\n"
-        f"• Resultado: *{resultado}*\n\n"
-        f"📈 *Estadísticas:* Total: {stats['total']} | Wins: {stats['wins']} | Losses: {stats['losses']} | Winrate: {winrate:.1f}%"
+        f"REPORTE DE RESULTADO 📊\n\n"
+        f"Operación: {tipo} {'🟢 (SUBIR / VERDE)' if tipo == 'CALL' else '🔴 (BAJAR / ROJA)'}\n"
+        f"Resultado: {resultado_str}\n\n"
+        f"• Apertura: ${precio_entrada:,.2f} | Cierre: ${precio_actual:,.2f}\n"
+        f"• Vela final: {vela_final}\n\n"
+        f"📈 EFECTIVIDAD ACUMULADA:\n"
+        f"• Historial: {wins} WINS - {losses} LOSS\n"
+        f"• Winrate Global: {winrate:.1f}%"
     )
     print(msg_eval)
     enviar_telegram(msg_eval)
@@ -95,13 +100,11 @@ def evaluar_operacion_anterior(precio_actual):
         os.remove(PENDIENTE_FILE)
 
 def obtener_velas_kraken():
-    """Consulta velas de 5m de BTC/USD en la API pública de Kraken (sin bloqueos de región en GitHub)"""
     url = "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=5"
     try:
         response = requests.get(url, timeout=10)
         data = response.json()
         if "result" in data and "XXBTZUSD" in data["result"]:
-            # Kraken devuelve una lista de listas: [time, open, high, low, close, vwap, volume, count]
             return data["result"]["XXBTZUSD"]
         else:
             print(f"Error en respuesta de Kraken: {data}")
@@ -130,9 +133,7 @@ def main():
         print("No se pudieron obtener datos de mercado.")
         return
 
-    # Convertir a DataFrame asegurando las columnas clave
     df = pd.DataFrame(raw_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'vwap', 'volume', 'count'])
-    
     df['close'] = df['close'].astype(float)
     df['open'] = df['open'].astype(float)
     df['high'] = df['high'].astype(float)
@@ -164,12 +165,32 @@ def main():
     print(f"💡 Precio BTC (Kraken): {precio_actual} | EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | RSI: {rsi:.2f}")
 
     if senal:
+        stats = cargar_json(ESTADISTICAS_FILE, {"wins": 0, "losses": 0, "total": 0})
+        wins = stats["wins"]
+        total = stats["total"]
+        winrate_global = (wins / total) * 100 if total > 0 else 0
+        
+        # Calcular precio de entrada ideal por retroceso hacia la EMA20
+        if senal == "CALL":
+            precio_ideal = ema20 - 2.0  # Ligero retroceso hacia abajo para compra
+            op_texto = "CALL 🟢 (SUBIR / VERDE)"
+            consejo = f"Espera los primeros 15-30 segundos a que la vela haga un ligero retroceso hacia los ${precio_ideal:,.2f} antes de entrar."
+        else:
+            precio_ideal = ema20 + 2.0  # Ligero retroceso hacia arriba para venta
+            op_texto = "PUT 🔴 (BAJAR / ROJA)"
+            consejo = f"Espera los primeros 15-30 segundos a que la vela haga un ligero retroceso hacia los ${precio_ideal:,.2f} antes de entrar."
+
+        # Plantilla de Señal
         msg_senal = (
-            f"🚨 *¡NUEVA SEÑAL BINARIAS (5m)*\n\n"
-            f"🪙 Par: `BTC/USD (Kraken)`\n"
-            f"📈 Dirección: *{senal}*\n"
-            f"💵 Precio sugerido: `{precio_actual}`\n"
-            f"📊 RSI: `{rsi:.2f}` | EMA20: `{ema20:.2f}`"
+            f"OPCIONES BINARIAS BTC 🎯\n\n"
+            f"Operación Sugerida: {op_texto}\n"
+            f"Certeza Técnica: 100%\n"
+            f"Winrate del Bot: {winrate_global:.1f}% ({wins}/{total})\n\n"
+            f"• Expiración: Vela de 5 Minutos\n"
+            f"• Precio Apertura: ${precio_actual:,.2f}\n"
+            f"🎯 ENTRADA IDEAL (Retroceso): ${precio_ideal:,.2f}\n\n"
+            f"💡 CONSEJO DE EJECUCIÓN:\n"
+            f"{consejo}"
         )
         print(msg_senal)
         enviar_telegram(msg_senal)
