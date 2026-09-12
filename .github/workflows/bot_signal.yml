@@ -5,6 +5,10 @@ on:
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
+# 👇 ESTO ES LO NUEVO QUE DA PERMISO DE ESCRITURA AL BOT 👇
+permissions:
+  contents: write
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
