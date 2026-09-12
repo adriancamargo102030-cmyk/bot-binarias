@@ -65,7 +65,6 @@ def calcular_indicadores(df):
     return df
 
 def main():
-    # 1. Obtener datos de Kraken siempre de entrada
     raw_data = obtener_velas_kraken()
     if not raw_data:
         print("No se pudieron obtener datos de mercado.")
@@ -79,8 +78,7 @@ def main():
 
     precio_actual = df['close'].iloc[-1]
 
-    # 2. EVALUACIÓN OBLIGATORIA DE LA OPERACIÓN ANTERIOR
-    # Si hay una operación pendiente, se procesa el resultado y se envía el reporte de forma independiente.
+    # EVALUACIÓN OBLIGATORIA DE LA OPERACIÓN ANTERIOR
     pendiente = cargar_json(PENDIENTE_FILE, None)
     if pendiente:
         stats = cargar_json(ESTADISTICAS_FILE, {"wins": 0, "losses": 0, "total": 0})
@@ -121,11 +119,10 @@ def main():
         enviar_telegram(msg_eval)
         
         guardar_json(ESTADISTICAS_FILE, stats)
-        # Eliminamos el archivo pendiente para que no se repita
         if os.path.exists(PENDIENTE_FILE):
             os.remove(PENDIENTE_FILE)
 
-    # 3. FILTRO DE TIEMPO PARA NUEVAS SEÑALES
+    # FILTRO DE TIEMPO PARA NUEVAS SEÑALES
     ahora = datetime.now(timezone.utc)
     segundos_en_minuto = ahora.second + (ahora.microsecond / 1_000_000)
     segundos_en_ciclo = (ahora.minute % 5) * 60 + segundos_en_minuto
@@ -136,27 +133,33 @@ def main():
         print("❌ Filtro de tiempo activado: Se superaron los 230 segundos. Omitiendo la búsqueda de NUEVA señal para este ciclo.")
         return
 
-    # 4. BUSCAR NUEVA SEÑAL SI EL TIEMPO ES ADECUADO
+    # BUSCAR NUEVA SEÑAL CON CONDICIONES BALANCEADAS (CALL / PUT)
     df = calcular_indicadores(df)
     ema20 = df['ema20'].iloc[-1]
     ema50 = df['ema50'].iloc[-1]
     rsi = df['rsi'].iloc[-1]
     
     senal = None
-    if ema20 > ema50 and 40 < rsi < 55:
-        if precio_actual <= ema20:
+    
+    # Lógica equilibrada: 
+    # CALL si la tendencia es alcista (EMA20 > EMA50) o el RSI indica rebote alcista (RSI < 48)
+    if ema20 >= ema50 or rsi < 48:
+        if precio_actual <= ema20 * 1.001:  # Cerca o por debajo de la EMA20
             senal = "CALL"
-    elif ema20 < ema50 and 45 < rsi < 60:
-        if precio_actual >= ema20:
-            senal = "PUT"
             
-    if not senal:
-        if rsi < 35:
-            senal = "CALL"
-        elif rsi > 65:
+    # PUT si la tendencia es bajista (EMA20 < EMA50) o el RSI indica rebote bajista (RSI > 52)
+    if not senal and (ema20 < ema50 or rsi > 52):
+        if precio_actual >= ema20 * 0.999:  # Cerca o por encima de la EMA20
             senal = "PUT"
 
-    print(f"💡 Precio BTC (Kraken): {precio_actual} | EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | RSI: {rsi:.2f}")
+    # Respaldo por extremos de RSI si las medias están muy planas
+    if not senal:
+        if rsi < 42:
+            senal = "CALL"
+        elif rsi > 58:
+            senal = "PUT"
+
+    print(f"💡 Precio BTC (Kraken): {precio_actual} | EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | RSI: {rsi:.2f} | Señal: {senal}")
 
     if senal:
         stats = cargar_json(ESTADISTICAS_FILE, {"wins": 0, "losses": 0, "total": 0})
@@ -167,11 +170,11 @@ def main():
         if senal == "CALL":
             precio_ideal = ema20 - 2.0
             op_texto = "CALL 🟢 (SUBIR / VERDE)"
-            consejo = f"Espera los primeros 15-30 segundos a que la vela haga un ligero retroceso hacia los ${precio_ideal:,.2f} antes de entrar."
+            consejo = f"Espera los primeros 15-30 segundos a que la vela haga un ligero retroceso hacia los ${precio_ideal:,.2f} antes de entrar en compra."
         else:
             precio_ideal = ema20 + 2.0
             op_texto = "PUT 🔴 (BAJAR / ROJA)"
-            consejo = f"Espera los primeros 15-30 segundos a que la vela haga un ligero retroceso hacia los ${precio_ideal:,.2f} antes de entrar."
+            consejo = f"Espera los primeros 15-30 segundos a que la vela haga un ligero retroceso hacia los ${precio_ideal:,.2f} antes de entrar en venta."
 
         msg_senal = (
             f"OPCIONES BINARIAS BTC 🎯\n\n"
@@ -198,4 +201,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-            
+    
