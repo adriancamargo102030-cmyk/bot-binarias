@@ -2,7 +2,6 @@ import os
 import json
 import time
 from datetime import datetime, timezone
-import ccxt
 import pandas as pd
 import requests
 
@@ -95,6 +94,21 @@ def evaluar_operacion_anterior(precio_actual):
     if os.path.exists(PENDIENTE_FILE):
         os.remove(PENDIENTE_FILE)
 
+def obtener_velas_binance():
+    """Consulta directa a la API pública de Binance Spot para evitar bloqueos geográficos de CCXT"""
+    url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=100"
+    try:
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        if isinstance(data, list):
+            return data
+        else:
+            print(f"Error en respuesta de Binance: {data}")
+            return None
+    except Exception as e:
+        print(f"Error conectando a la API de Binance: {e}")
+        return None
+
 def calcular_indicadores(df):
     df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
@@ -110,21 +124,24 @@ def main():
     if not verificar_filtro_tiempo():
         return
 
-    exchange = ccxt.binance({
-        'urls': {
-            'api': {
-                'public': 'https://data-api.binance.vision/api/v3',
-            }
-        }
-    })
-
-    try:
-        ohlcv = exchange.fetch_ohlcv('BTC/USDT', timeframe='5m', limit=100)
-    except Exception as e:
-        print(f"Error conectando a Binance Vision: {e}")
+    raw_data = obtener_velas_binance()
+    if not raw_data:
+        print("No se pudieron obtener datos de Binance.")
         return
 
-    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    # Convertir a DataFrame (la API devuelve [timestamp, open, high, low, close, volume, ...])
+    df = pd.DataFrame(raw_data, columns=[
+        'timestamp', 'open', 'high', 'low', 'close', 'volume', 
+        'close_time', 'quote_asset_volume', 'number_of_trades', 
+        'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+    ])
+    
+    # Convertir columnas de precios a float
+    df['close'] = df['close'].astype(float)
+    df['open'] = df['open'].astype(float)
+    df['high'] = df['high'].astype(float)
+    df['low'] = df['low'].astype(float)
+
     df = calcular_indicadores(df)
 
     precio_actual = df['close'].iloc[-1]
@@ -172,4 +189,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-      
+    
