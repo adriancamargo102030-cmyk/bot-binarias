@@ -38,8 +38,8 @@ def obtener_velas_kraken():
         return None
 
 def calcular_indicadores(df):
-    df['ema20'] = df['close'].ewm(span=20, adjust=False).mean()
-    df['ema50'] = df['close'].ewm(span=50, adjust=False).mean()
+    df['ema10'] = df['close'].ewm(span=10, adjust=False).mean()
+    df['ema30'] = df['close'].ewm(span=30, adjust=False).mean()
     
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -62,63 +62,66 @@ def main():
 
     precio_actual = df['close'].iloc[-1]
 
-    # FILTRO DE TIEMPO (Primeros 230 segundos del ciclo de 5 minutos)
+    # FILTRO DE TIEMPO (Primeros 200 segundos del ciclo de 5 minutos para dar margen de entrada)
     ahora = datetime.now(timezone.utc)
     segundos_en_minuto = ahora.second + (ahora.microsecond / 1_000_000)
     segundos_en_ciclo = (ahora.minute % 5) * 60 + segundos_en_minuto
     
     print(f"[{ahora.strftime('%Y-%m-%d %H:%M:%S UTC')}] Segundos transcurridos en el ciclo de 5m: {segundos_en_ciclo:.2f}s")
     
-    if segundos_en_ciclo > 230:
-        print("❌ Filtro de tiempo activado: Se superaron los 230 segundos. Omitiendo búsqueda de señal.")
+    if segundos_en_ciclo > 200:
+        print("❌ Filtro de tiempo activado: Fuera del tiempo óptimo de entrada. Omitiendo búsqueda.")
         return
 
-    # FILTROS TÉCNICOS DE ALTA CERTEZA
+    # INDICADORES ÁGILES
     df = calcular_indicadores(df)
-    ema20 = df['ema20'].iloc[-1]
-    ema50 = df['ema50'].iloc[-1]
+    ema10 = df['ema10'].iloc[-1]
+    ema30 = df['ema30'].iloc[-1]
     rsi = df['rsi'].iloc[-1]
-    
-    vela_anterior_verde = df['close'].iloc[-2] > df['open'].iloc[-2]
-    vela_anterior_roja = df['close'].iloc[-2] < df['open'].iloc[-2]
     
     senal = None
     
-    # REGLA DE ALTA CERTEZA PARA CALL (COMPRA)
-    if ema20 > ema50 and 42 < rsi < 58:
-        if precio_actual <= ema20 * 1.0015 and vela_anterior_verde:
+    # ESTRATEGIA DE MOMENTUM RÁPIDO Y REVERSIÓN EN ZONAS CLAVE
+    # 1. Si la EMA rápida cruza o está por encima y el RSI no está sobrecomprado extremo
+    if ema10 > ema30 and rsi < 65 and rsi > 35:
+        if precio_actual >= ema10:  # Rebote alcista sobre la media rápida
             senal = "CALL"
             
-    # REGLA DE ALTA CERTEZA PARA PUT (VENTA)
-    elif ema20 < ema50 and 42 < rsi < 58:
-        if precio_actual >= ema20 * 0.9985 and vela_anterior_roja:
+    # 2. Si la EMA rápida está por debajo y el RSI no está sobrevendido extremo
+    elif ema10 < ema30 and rsi > 35 and rsi < 65:
+        if precio_actual <= ema10:  # Rebote bajista bajo la media rápida
             senal = "PUT"
 
-    print(f"💡 Precio BTC: {precio_actual} | EMA20: {ema20:.2f} | EMA50: {ema50:.2f} | RSI: {rsi:.2f} | Señal Detectada: {senal}")
+    # 3. Respaldo por extremos puros de RSI (Sobreventa / Sobrecompra para giros rápidos de 5m)
+    if not senal:
+        if rsi < 32:
+            senal = "CALL"
+        elif rsi > 68:
+            senal = "PUT"
+
+    print(f"💡 Precio BTC: {precio_actual} | EMA10: {ema10:.2f} | EMA30: {ema30:.2f} | RSI: {rsi:.2f} | Señal: {senal}")
 
     if senal:
         if senal == "CALL":
-            precio_ideal = ema20 - 1.5
             op_texto = "CALL 🟢 (SUBIR / VERDE)"
-            consejo = "Tendencia alcista confirmada. Espera 15-30s un micro-retroceso hacia la EMA antes de entrar."
+            consejo = "Impulso alcista detectado. Entra buscando el rebote de la vela."
         else:
-            precio_ideal = ema20 + 1.5
             op_texto = "PUT 🔴 (BAJAR / ROJA)"
-            consejo = "Tendencia bajista confirmada. Espera 15-30s un micro-retroceso hacia la EMA antes de entrar."
+            consejo = "Impulso bajista detectado. Entra buscando el retroceso a la baja."
 
         msg_senal = (
-            f"OPCIONES BINARIAS BTC (PRO) 🎯\n\n"
-            f"Señal de Alta Certeza: {op_texto}\n\n"
+            f"OPCIONES BINARIAS BTC (FAST) 🎯\n\n"
+            f"Señal Detectada: {op_texto}\n\n"
             f"• Expiración: Vela de 5 Minutos\n"
-            f"• Precio Apertura: ${precio_actual:,.2f}\n"
-            f"🎯 ENTRADA IDEAL: ${precio_ideal:,.2f}\n\n"
+            f"• Precio Actual: ${precio_actual:,.2f}\n"
+            f"• RSI Actual: {rsi:.1f}\n\n"
             f"💡 CONSEJO:\n"
             f"{consejo}"
         )
         print(msg_senal)
         enviar_telegram(msg_senal)
     else:
-        print("⏳ Mercado en rango o sin confirmación estricta. No se emite señal.")
+        print("⏳ Mercado en consolidación. Buscando en el siguiente ciclo...")
 
 if __name__ == "__main__":
     main()
